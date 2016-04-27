@@ -6,12 +6,12 @@ Because the set stored is a proper superset of the set of items added, false pos
 
 Bloom filters offer the following advantages:
 
-    Space: Approximately n * lg(1/ε), where ε is the false positive rate and n is the number of elements in the set.
-        Example: There are approximately 170k words in the English language. If we consider that to be our set (therefore n = 1.7E5), and we wish to search a corpus for them with a 1% false positive rate, the filter would require about (1.7E5 * lg(1 / 0.01)) ≈ 162 KB. Contrast this with a hashtable, which would require (1.7E5 elements * 32 bits per element) ≈ 664 KB. Obviously explicit string storage would be significantly more. 
-    Precision: Arbitrary precision, where increasing precision requires more space (following the above size equation) but not more time.
-        Example: If we wanted to reduce our false positive rate in the above example from one percent to one permille the space requirement would go from about 162 KB to about 207 KB. 
-    Time: O(k) where k is the number of hash functions. The optimal number of hash functions (though a different number can be supplied by the user if desired) is ceiling(lg(1/ε))
-        Example: In keeping with our above example, if the accepted false positive rate is 0.001, k = 10. 
+	Space: Approximately n * lg(1/ε), where ε is the false positive rate and n is the number of elements in the set.
+		Example: There are approximately 170k words in the English language. If we consider that to be our set (therefore n = 1.7E5), and we wish to search a corpus for them with a 1% false positive rate, the filter would require about (1.7E5 * lg(1 / 0.01)) ≈ 162 KB. Contrast this with a hashtable, which would require (1.7E5 elements * 32 bits per element) ≈ 664 KB. Obviously explicit string storage would be significantly more. 
+	Precision: Arbitrary precision, where increasing precision requires more space (following the above size equation) but not more time.
+		Example: If we wanted to reduce our false positive rate in the above example from one percent to one permille the space requirement would go from about 162 KB to about 207 KB. 
+	Time: O(k) where k is the number of hash functions. The optimal number of hash functions (though a different number can be supplied by the user if desired) is ceiling(lg(1/ε))
+		Example: In keeping with our above example, if the accepted false positive rate is 0.001, k = 10. 
 
 A real world application illustrating the size difference might be Google Chrome's malicious URL detection. With a set of around 1 million URLs, each URL hashing down to about 25 bytes, results in a set of around 25 MB. This is significantly larger than Chrome itself. Instead using a Bloom filter with a 1% error rate requires only 1.13 MB. 
 
@@ -24,11 +24,9 @@ Usage is straightforward for the most common cases: strings and ints. The only t
 Here's an example demonstrating its use with strings:
 
 int capacity = 2000000; // the number of items you expect to add to the filter
-Filter<string> filter = new Filter<string>(capacity);
-// add your items, using:
-filter.Add("SomeString");
-// now you can check for them, using:
-if (filter.Contains("SomeString"))
+var filter = new Filter<string>(capacity);
+filter.Add("SomeString"); // add your items
+if (filter.Contains("SomeString")) // check other strings against the filter
 	Console.WriteLine("Match!");
 
 Bloom filters can't be resized, so setting the capacity is important for memory sizing. The false-positive rate also plays in here. 

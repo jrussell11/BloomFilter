@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Diagnostics;
+using System.Linq;
 
 namespace BloomFilter
 {
@@ -33,7 +34,7 @@ namespace BloomFilter
         /// </summary>
         /// <param name="capacity">The anticipated number of items to be added to the filter. More than this number of items can be added, but the error rate will exceed what is expected.</param>
         /// <param name="hashFunction">The function to hash the input values. Do not use GetHashCode(). If it is null, and T is string or int a hash function will be provided for you.</param>
-        public Filter(int capacity, HashFunction hashFunction) : this(capacity, bestErrorRate(capacity), hashFunction) { }
+        public Filter(int capacity, HashFunction hashFunction) : this(capacity, BestErrorRate(capacity), hashFunction) { }
 
         /// <summary>
         /// Creates a new Bloom filter, using the optimal size for the underlying data structure based on the desired capacity and error rate, as well as the optimal number of hash functions.
@@ -41,7 +42,7 @@ namespace BloomFilter
         /// <param name="capacity">The anticipated number of items to be added to the filter. More than this number of items can be added, but the error rate will exceed what is expected.</param>
         /// <param name="errorRate">The accepable false-positive rate (e.g., 0.01F = 1%)</param>
         /// <param name="hashFunction">The function to hash the input values. Do not use GetHashCode(). If it is null, and T is string or int a hash function will be provided for you.</param>
-        public Filter(int capacity, float errorRate, HashFunction hashFunction) : this(capacity, errorRate, hashFunction, bestM(capacity, errorRate), bestK(capacity, errorRate)) { }
+        public Filter(int capacity, float errorRate, HashFunction hashFunction) : this(capacity, errorRate, hashFunction, BestM(capacity, errorRate), BestK(capacity, errorRate)) { }
 
         /// <summary>
         /// Creates a new Bloom filter.
@@ -55,33 +56,33 @@ namespace BloomFilter
         {
             // validate the params are in range
             if (capacity < 1)
-                throw new ArgumentOutOfRangeException("capacity", capacity, "capacity must be > 0");
+                throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "capacity must be > 0");
             if (errorRate >= 1 || errorRate <= 0)
-                throw new ArgumentOutOfRangeException("errorRate", errorRate, String.Format("errorRate must be between 0 and 1, exclusive. Was {0}", errorRate));
+                throw new ArgumentOutOfRangeException(nameof(errorRate), errorRate, $"errorRate must be between 0 and 1, exclusive. Was {errorRate}");
             if (m < 1) // from overflow in bestM calculation
-                throw new ArgumentOutOfRangeException(String.Format("The provided capacity and errorRate values would result in an array of length > int.MaxValue. Please reduce either of these values. Capacity: {0}, Error rate: {1}", capacity, errorRate));
+                throw new ArgumentOutOfRangeException($"The provided capacity and errorRate values would result in an array of length > int.MaxValue. Please reduce either of these values. Capacity: {capacity}, Error rate: {errorRate}");
 
             // set the secondary hash function
             if (hashFunction == null)
             {
                 if (typeof(T) == typeof(String))
                 {
-                    getHashSecondary = hashString;
+                    _secondaryHash = HashString;
                 }
                 else if (typeof(T) == typeof(int))
                 {
-                    getHashSecondary = hashInt32;
+                    _secondaryHash = HashInt32;
                 }
                 else
                 {
-                    throw new ArgumentNullException("hashFunction", "Please provide a hash function for your type T, when T is not a string or int.");
+                    throw new ArgumentNullException(nameof(hashFunction), "Please provide a hash function for your type T, when T is not a string or int.");
                 }
             }
             else
-                getHashSecondary = hashFunction;
+                _secondaryHash = hashFunction;
 
-            hashFunctionCount = k;
-            hashBits = new BitArray(m);
+            _hashFunctionCount = k;
+            _hashBits = new BitArray(m);
         }
 
         /// <summary>
@@ -91,12 +92,10 @@ namespace BloomFilter
         public void Add(T item)
         {
             // start flipping bits for each hash of item
-            int primaryHash = item.GetHashCode();
-            int secondaryHash = getHashSecondary(item);
-            for (int i = 0; i < hashFunctionCount; i++)
+            for (var i = 0; i < _hashFunctionCount; i++)
             {
-                int hash = computeHash(primaryHash, secondaryHash, i);
-                hashBits[hash] = true;
+                var hash = ComputeHash(item.GetHashCode(), _secondaryHash(item), i);
+                _hashBits[hash] = true;
             }
         }
 
@@ -107,12 +106,10 @@ namespace BloomFilter
         /// <returns></returns>
         public bool Contains(T item)
         {
-            int primaryHash = item.GetHashCode();
-            int secondaryHash = getHashSecondary(item);
-            for (int i = 0; i < hashFunctionCount; i++)
+            for (var i = 0; i < _hashFunctionCount; i++)
             {
-                int hash = computeHash(primaryHash, secondaryHash, i);
-                if (hashBits[hash] == false)
+                var hash = ComputeHash(item.GetHashCode(), _secondaryHash(item), i);
+                if (_hashBits[hash] == false)
                     return false;
             }
             return true;
@@ -121,55 +118,42 @@ namespace BloomFilter
         /// <summary>
         /// The ratio of false to true bits in the filter. E.g., 1 true bit in a 10 bit filter means a truthiness of 0.1.
         /// </summary>
-        public double Truthiness
-        {
-            get
-            {
-                return (double) trueBits() / hashBits.Count;
-            }
-        }
+        public double Truthiness => (double) TrueBits() / _hashBits.Count;
 
-        private int trueBits()
+        private int TrueBits()
         {
-            int output = 0;
-            foreach (bool bit in hashBits)
-            {
-                if (bit == true)
-                    output++;
-            }
-            return output;
+            return _hashBits.Cast<bool>().Count(bit => bit);
         }
 
         /// <summary>
         /// Performs Dillinger and Manolios double hashing. 
         /// </summary>
-        private int computeHash(int primaryHash, int secondaryHash, int i)
+        private int ComputeHash(int primaryHash, int secondaryHash, int i)
         {
-            int resultingHash = (primaryHash + (i * secondaryHash)) % hashBits.Count;
-            return Math.Abs((int)resultingHash);
+            var resultingHash = (primaryHash + (i * secondaryHash)) % _hashBits.Count;
+            return Math.Abs(resultingHash);
         }
 
-        private int hashFunctionCount;
-        private BitArray hashBits;
-        private HashFunction getHashSecondary;
+        private readonly int _hashFunctionCount;
+        private readonly BitArray _hashBits;
+        private readonly HashFunction _secondaryHash;
 
-        private static int bestK(int capacity, float errorRate)
+        private static int BestK(int capacity, float errorRate)
         {
-            return (int)Math.Round(Math.Log(2.0) * bestM(capacity, errorRate) / capacity);
+            return (int)Math.Round(Math.Log(2.0) * BestM(capacity, errorRate) / capacity);
         }
 
-        private static int bestM(int capacity, float errorRate)
+        private static int BestM(int capacity, float errorRate)
         { 
             return (int)Math.Ceiling(capacity * Math.Log(errorRate, (1.0 / Math.Pow(2, Math.Log(2.0)))));
         }
 
-        private static float bestErrorRate(int capacity)
+        private static float BestErrorRate(int capacity)
         {
-            float c = (float)(1.0 / capacity);
-            if (c != 0)
+            var c = (float)(1.0 / capacity);
+            if (Math.Abs(c) > 0.0000000001)
                 return c;
-            else
-                return (float)Math.Pow(0.6185, int.MaxValue / capacity); // http://www.cs.princeton.edu/courses/archive/spring02/cs493/lec7.pdf
+            return (float)Math.Pow(0.6185, int.MaxValue / capacity); // http://www.cs.princeton.edu/courses/archive/spring02/cs493/lec7.pdf
         }
 
         /// <summary>
@@ -178,9 +162,9 @@ namespace BloomFilter
         /// </summary>
         /// <param name="input">The integer to hash.</param>
         /// <returns>The hashed result.</returns>
-        private static int hashInt32(T input)
+        private static int HashInt32(T input)
         {
-            uint? x = input as uint?;
+            var x = input as uint?;
             unchecked
             {
                 x = ~x + (x << 15); // x = (x << 15) - x- 1, as (~x) + y is equivalent to y - x - 1 in two's complement representation
@@ -189,6 +173,7 @@ namespace BloomFilter
                 x = x ^ (x >> 4);
                 x = x * 2057; // x = (x + (x << 3)) + (x<< 11);
                 x = x ^ (x >> 16);
+                Debug.Assert(x != null, "x != null");
                 return (int)x;
             }
         }
@@ -199,14 +184,15 @@ namespace BloomFilter
         /// </summary>
         /// <param name="input">The string to hash.</param>
         /// <returns>The hashed result.</returns>
-        private static int hashString(T input)
+        private static int HashString(T input)
         {
-            string s = input as string;
-            int hash = 0;
+            var s = input as string;
+            var hash = 0;
 
-            for (int i = 0; i < s.Length; i++)
+            Debug.Assert(s != null, "s != null");
+            foreach (var t in s)
             {
-                hash += s[i];
+                hash += t;
                 hash += (hash << 10);
                 hash ^= (hash >> 6);
             }
